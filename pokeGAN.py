@@ -10,12 +10,14 @@ import cv2
 import random
 import scipy.misc
 from utils import *
+import sys
+import datetime
 
 slim = tf.contrib.slim
 
-HEIGHT, WIDTH, CHANNEL = 128, 128, 3
+HEIGHT, WIDTH, CHANNEL = 512, 512, 3
 BATCH_SIZE = 64
-EPOCH = 5000
+EPOCH = 100
 version = 'newPokemon'
 newPoke_path = './' + version
 
@@ -69,6 +71,8 @@ def generator(input, random_dim, is_train, reuse=False):
     with tf.variable_scope('gen') as scope:
         if reuse:
             scope.reuse_variables()
+
+        # 4*4*512
         w1 = tf.get_variable('w1', shape=[random_dim, s4 * s4 * c4], dtype=tf.float32,
                              initializer=tf.truncated_normal_initializer(stddev=0.02))
         b1 = tf.get_variable('b1', shape=[c4 * s4 * s4], dtype=tf.float32,
@@ -98,14 +102,14 @@ def generator(input, random_dim, is_train, reuse=False):
         bn4 = tf.contrib.layers.batch_norm(conv4, is_training=is_train, epsilon=1e-5, decay = 0.9,  updates_collections=None, scope='bn4')
         act4 = tf.nn.relu(bn4, name='act4')
         # 64*64*32
-        conv5 = tf.layers.conv2d_transpose(act4, c64, kernel_size=[5, 5], strides=[2, 2], padding="SAME",
+        conv5 = tf.layers.conv2d_transpose(act4, c64, kernel_size=[5, 5], strides=[4, 4], padding="SAME",
                                            kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
                                            name='conv5')
         bn5 = tf.contrib.layers.batch_norm(conv5, is_training=is_train, epsilon=1e-5, decay = 0.9,  updates_collections=None, scope='bn5')
         act5 = tf.nn.relu(bn5, name='act5')
         
-        #128*128*3
-        conv6 = tf.layers.conv2d_transpose(act5, output_dim, kernel_size=[5, 5], strides=[2, 2], padding="SAME",
+        #256*256*3
+        conv6 = tf.layers.conv2d_transpose(act5, output_dim, kernel_size=[5, 5], strides=[4, 4], padding="SAME",
                                            kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
                                            name='conv6')
         # bn6 = tf.contrib.layers.batch_norm(conv6, is_training=is_train, epsilon=1e-5, decay = 0.9,  updates_collections=None, scope='bn6')
@@ -120,13 +124,13 @@ def discriminator(input, is_train, reuse=False):
             scope.reuse_variables()
 
         #Convolution, activation, bias, repeat! 
-        conv1 = tf.layers.conv2d(input, c2, kernel_size=[5, 5], strides=[2, 2], padding="SAME",
+        conv1 = tf.layers.conv2d(input, c2, kernel_size=[5, 5], strides=[4, 4], padding="SAME",
                                  kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
                                  name='conv1')
         bn1 = tf.contrib.layers.batch_norm(conv1, is_training = is_train, epsilon=1e-5, decay = 0.9,  updates_collections=None, scope = 'bn1')
         act1 = lrelu(conv1, n='act1')
          #Convolution, activation, bias, repeat! 
-        conv2 = tf.layers.conv2d(act1, c4, kernel_size=[5, 5], strides=[2, 2], padding="SAME",
+        conv2 = tf.layers.conv2d(act1, c4, kernel_size=[5, 5], strides=[4, 4], padding="SAME",
                                  kernel_initializer=tf.truncated_normal_initializer(stddev=0.02),
                                  name='conv2')
         bn2 = tf.contrib.layers.batch_norm(conv2, is_training=is_train, epsilon=1e-5, decay = 0.9,  updates_collections=None, scope='bn2')
@@ -254,27 +258,53 @@ def train():
     coord.join(threads)
 
 
-# def test():
-    # random_dim = 100
-    # with tf.variable_scope('input'):
-        # real_image = tf.placeholder(tf.float32, shape = [None, HEIGHT, WIDTH, CHANNEL], name='real_image')
-        # random_input = tf.placeholder(tf.float32, shape=[None, random_dim], name='rand_input')
-        # is_train = tf.placeholder(tf.bool, name='is_train')
+def test(number):
+    random_dim = 100
+    with tf.variable_scope('input'):
+        real_image = tf.placeholder(tf.float32, shape = [None, HEIGHT, WIDTH, CHANNEL], name='real_image')
+        random_input = tf.placeholder(tf.float32, shape=[None, random_dim], name='rand_input')
+        is_train = tf.placeholder(tf.bool, name='is_train')
     
-    # # wgan
-    # fake_image = generator(random_input, random_dim, is_train)
-    # real_result = discriminator(real_image, is_train)
-    # fake_result = discriminator(fake_image, is_train, reuse=True)
-    # sess = tf.InteractiveSession()
-    # sess.run(tf.global_variables_initializer())
-    # variables_to_restore = slim.get_variables_to_restore(include=['gen'])
-    # print(variables_to_restore)
-    # saver = tf.train.Saver(variables_to_restore)
-    # ckpt = tf.train.latest_checkpoint('./model/' + version)
-    # saver.restore(sess, ckpt)
+    # wgan
+    fake_image = generator(random_input, random_dim, is_train)
 
+    real_result = discriminator(real_image, is_train)
+    fake_result = discriminator(fake_image, is_train, reuse=True)
+
+    sess = tf.InteractiveSession()
+    sess.run(tf.global_variables_initializer())
+    variables_to_restore = slim.get_variables_to_restore(include=['gen'])
+    print(variables_to_restore)
+    saver = tf.train.Saver(variables_to_restore)
+    ckpt = tf.train.latest_checkpoint('./model/' + version)
+    saver.restore(sess, ckpt)
+
+    # writing testing result
+    random_dim = 100
+
+    for i in range (0, number):
+
+        sample_noise = np.random.uniform(-1.0, 1.0, size=[1, random_dim]).astype(np.float32)
+        test_result = sess.run(fake_image, feed_dict={random_input: sample_noise, is_train: False})
+        current_datetime = datetime.datetime.now();
+        current_int = int(current_datetime.strftime('%Y%m%d%H%M%S'))
+        save_images(test_result, [1,1] ,newPoke_path + '/test' + str(current_int) + str(i) + '.jpg')
+
+def main(argv):
+    if argv[1][1:] == "train":
+        print("start training")
+        train()
+    elif argv[1][1:] == "test":
+        print("start testing")
+        test(1)
+    elif (argv[1][1:]).isdigit():
+        print("start generating")
+        test(int (argv[1][1:]))
+    else:
+        print("unrecognised argument!")
 
 if __name__ == "__main__":
-    train()
-    # test()
+    
+    main(sys.argv);
+
 
